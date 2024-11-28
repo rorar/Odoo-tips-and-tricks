@@ -1,4 +1,4 @@
-# Odoo-tips-and-tricks
+# Odoo tips and tricks
 
 ## Import a list of Banks to Odoo:
 Odoo Dashboard > Contacts > Configuration > Banks > Actions ⚙️ > Import 
@@ -6,10 +6,13 @@ Odoo Dashboard > Contacts > Configuration > Banks > Actions ⚙️ > Import
 ### Preparations
 #### Data Sources
 ##### Deutsche Bundesbank (German Federal Bank)
-Have a look at "Bankleitzahlendateien ungepackt"
+Have a look at "Bankleitzahlendateien ungepackt" 
 https://www.bundesbank.de/de/aufgaben/unbarer-zahlungsverkehr/serviceangebot/bankleitzahlen/download-bankleitzahlen-602592
 ##### European Central Bank
 https://www.ecb.europa.eu/stats/financial_corporations/list_of_financial_institutions/html/daily_list-MID.en.html
+##### OCA
+Example for Spain
+https://github.com/OCA/l10n-spain/blob/15.0/l10n_es_partner/wizard/data_banks.xml
 #### Table headers
 Create a CSV-table with the following header:
 ```csv

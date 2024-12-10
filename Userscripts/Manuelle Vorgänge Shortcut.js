@@ -4,7 +4,7 @@
  // @version      2.4
  // @description  Aktiviert mit Strg+Shift+. den "Manuelle Vorgänge" Tab, wartet auf das Input-Feld, löscht den Text, gibt "2180 Privateinlagen" ein, drückt Enter, klickt auf ein Dropdown-Item, wartet und führt dann eine weitere Tastenkombination aus. Variablen und Selektoren können angepasst werden. Inklusive erweiterter Logging-Funktionalität.
  // @author       Dein Name
- // @match        *://*/*/odoo/accounting/*/reconciliation
+ // @match        *://*/odoo/accounting/*/reconciliation
  // @grant        none
  // ==/UserScript==
 

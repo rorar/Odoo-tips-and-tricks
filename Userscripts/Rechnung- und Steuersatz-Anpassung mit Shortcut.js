@@ -4,7 +4,7 @@
 // @version      3.6
 // @description  Ändert Buchungskonto und Steuersatz per Tastenkombination. STRG+SHIFT+Ü löscht beide Felder, STRG+SHIFT+Ä überschreibt Konto und löscht Steuersatz. Enthält echte Textlöschung und sequenzielle POST-Aktionen (ALT+S und ALT+Q).
 // @match        *://*/*/odoo/accounting/*/reconciliation/*/account.move/*
-// @match        *://*/*/odoo/bills/*
+// @match        *://*/odoo/bills/*
 // @grant        none
 // ==/UserScript==
 

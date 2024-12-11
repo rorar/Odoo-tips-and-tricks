@@ -408,6 +408,27 @@
         }
     }
 
+    // Funktion zur Überprüfung und Rücksetzung in den Entwurf-Modus, falls möglich
+    async function resetToDraftIfPossible() {
+        const draftButton = document.querySelector('button[name="button_draft"]');
+        if (draftButton) {
+            logInfo('Reset-to-Draft-Button gefunden. Simuliere ALT+R, um das Dokument in den Entwurf-Modus zurückzusetzen.');
+            simulateKeyCombination('r', 'Alt');
+            logInfo('Tastenkombination ALT+R simuliert.');
+
+            // Wartezeit, um sicherzustellen, dass das Dokument in den Entwurf-Modus zurückgesetzt wurde
+            await sleep(1000);
+
+            // Optional: Überprüfen, ob der Zustand tatsächlich auf 'Entwurf' geändert wurde
+            // Dies erfordert spezifische Kenntnisse über die DOM-Struktur nach dem Reset
+            // Hier ist eine generische Wartezeit implementiert
+            logInfo('Warte auf die Fertigstellung des Entwurf-Rücksetzens.');
+            await sleep(1000); // Anpassbar je nach Systemreaktion
+        } else {
+            logInfo('Reset-to-Draft-Button nicht gefunden. Überspringe Entwurf-Rücksetzung.');
+        }
+    }
+
     // Überarbeitete Funktion zur Verarbeitung aller relevanten Zeilen mit konfigurierbaren Aktionen
     async function processAllRows(actions) {
         logInfo('Beginne, alle relevanten <tr> Elemente zu zählen und zu verarbeiten.');
@@ -453,75 +474,58 @@
         // Strg+Shift+: Konto ändern
         // Strg+Shift+Ü: Konto und Steuersatz zurücksetzen (Konto clearen, Steuern entfernen, aber kein neuer Steuersatz)
 
-        if (e.ctrlKey && e.shiftKey && e.key === ':') {
-            e.preventDefault();
-            logInfo('Shortcut für Konto-Änderung ausgelöst (Strg+Shift+:)');
-            try {
-                await clickTab();
-                await waitForTabToLoad();
-                await processAllRows({ setAccount: true, clearTaxes: false, setTax: false });
-
-                await sleep(CONFIG.POST_CLICK_DELAY);
-                await performPostActions();
-
-                logInfo('Konto erfolgreich geändert.');
-            } catch (error) {
-                logWarn('Konto-Änderung fehlgeschlagen.');
+        // Definiere die Shortcuts mit ihren jeweiligen Aktionen
+        const shortcuts = [
+            {
+                keys: { ctrlKey: true, shiftKey: true, key: ':' },
+                description: 'Shortcut für Konto-Änderung (Strg+Shift+:)',
+                actions: { setAccount: true, clearTaxes: false, setTax: false }
+            },
+            {
+                keys: { ctrlKey: true, shiftKey: true, key: 'Ö' },
+                description: 'Shortcut für Steuer-Überschreibung + Konto-Änderung (Strg+Shift+Ö)',
+                actions: { setAccount: true, clearTaxes: true, setTax: true }
+            },
+            {
+                keys: { ctrlKey: true, shiftKey: true, key: 'Ü' },
+                description: 'Shortcut für Konto und Steuersatz löschen (Strg+Shift+Ü)',
+                actions: { setAccount: false, clearTaxes: true, setTax: false }
+            },
+            {
+                keys: { ctrlKey: true, shiftKey: true, key: 'Ä' },
+                description: 'Shortcut für Konto überschreiben und Steuersatz zurücksetzen (Strg+Shift+Ä)',
+                actions: { setAccount: true, clearTaxes: true, setTax: false }
             }
-        }
+        ];
 
-        if (e.ctrlKey && e.shiftKey && e.key === 'Ö') {
-            e.preventDefault();
-            logInfo('Shortcut für Steuer-Überschreibung + Konto-Änderung ausgelöst (Strg+Shift+Ö)');
-            try {
-                await clickTab();
-                await waitForTabToLoad();
+        // Überprüfe, ob der gedrückte Shortcut einem der definierten Shortcuts entspricht
+        for (const shortcut of shortcuts) {
+            if (e.ctrlKey === shortcut.keys.ctrlKey &&
+                e.shiftKey === shortcut.keys.shiftKey &&
+                e.key === shortcut.keys.key) {
 
-                await processAllRows({ setAccount: true, clearTaxes: true, setTax: true });
+                e.preventDefault();
+                logInfo(`${shortcut.description} ausgelöst.`);
 
-                await performPostActions();
+                try {
+                    // Überprüfe und setze gegebenenfalls in den Entwurf-Modus zurück
+                    await resetToDraftIfPossible();
 
-                logInfo('Steuersatz und Konto erfolgreich überschrieben.');
-            } catch (error) {
-                logWarn('Überschreibung fehlgeschlagen.');
-            }
-        }
+                    await clickTab();
+                    await waitForTabToLoad();
 
-        if (e.ctrlKey && e.shiftKey && e.key === 'Ü') {
-            e.preventDefault();
-            logInfo('Shortcut für Konto und Steuersatz löschen ausgelöst (Strg+Shift+Ü)');
-            try {
-                await clickTab();
-                await waitForTabToLoad();
+                    // Führe die definierten Aktionen aus
+                    await processAllRows(shortcut.actions);
 
-                // Für Strg+Shift+Ü: Konto löschen und Steuern löschen
-                await processAllRows({ setAccount: false, clearTaxes: true, setTax: false });
+                    await performPostActions();
 
-                await sleep(CONFIG.POST_CLICK_DELAY);
-                await performPostActions();
+                    logInfo(`${shortcut.description} erfolgreich ausgeführt.`);
+                } catch (error) {
+                    logWarn(`${shortcut.description} fehlgeschlagen.`);
+                }
 
-                logInfo('Steuersatz und Konto erfolgreich zurückgesetzt.');
-            } catch (error) {
-                logWarn('Zurücksetzen fehlgeschlagen.');
-            }
-        }
-
-        if (e.ctrlKey && e.shiftKey && e.key === 'Ä') {
-            e.preventDefault();
-            logInfo('Shortcut für Konto überschreiben und Steuersatz zurücksetzen ausgelöst (Strg+Shift+Ä)');
-            try {
-                await clickTab();
-                await waitForTabToLoad();
-
-                // Für Strg+Shift+Ä: Konto setzen und Steuern löschen, aber keinen neuen Steuersatz setzen
-                await processAllRows({ setAccount: true, clearTaxes: true, setTax: false });
-
-                await sleep(CONFIG.POST_CLICK_DELAY);
-                await performPostActions();
-
-                logInfo('Konto überschrieben und Steuersatz zurückgesetzt.');
-            } catch (error) {
-                logWarn('Operation fehlgeschlagen.');
+                // Nachdem der passende Shortcut gefunden und verarbeitet wurde, breche die Schleife ab
+                return;
             }
         }
     }
@@ -538,3 +542,4 @@
     }
 
 })();
+

@@ -66,9 +66,9 @@
         TAB_LOAD_SELECTOR: 'td[name="account_id"]',
 
         SHORTCUT_ACCOUNT_CHANGE: { ctrlKey: true, shiftKey: true, key: ':' },
-        SHORTCUT_TAX_OVERRIDE: { ctrlKey: true, shiftKey: true, key: 'Ö' },
+        SHORTCUT_TAX_OVERRIDE: { ctrlKey: true, shiftKey: true, key: 'Ö' },  // Konto + Alle Steuern löschen + neuen Steuersatz setzen
         SHORTCUT_RESET_BOTH: { ctrlKey: true, shiftKey: true, key: 'Ü' },
-        SHORTCUT_OVERRIDE_ACCOUNT_RESET_TAX: { ctrlKey: true, shiftKey: true, key: 'Ä' },
+        SHORTCUT_OVERRIDE_ACCOUNT_RESET_TAX: { ctrlKey: true, shiftKey: true, key: 'Ä' }, // Konto überschreiben + alle Steuern löschen
 
         TARGET_ACCOUNT_TEXT: '5900 Fremdleistungen',
         TARGET_TAX_TEXT: '19% EU O S',
@@ -82,11 +82,12 @@
         POST_CLICK_DELAY: 1500,
         POST_ENTER_DELAY: 1500,
 
-        PRE_ACTION_DELAY: 500,   // Delay vor allen Änderungen (ALT+S, ALT+Q, optional ALT+N)
-        POST_SAVE_DELAY: 500,    // Delay zwischen ALT+S und ALT+Q
-        POST_APPLY_DELAY: 500,   // Neuer Delay nach ALT+Q, bevor optional ALT+N ausgeführt wird
+        PRE_ACTION_DELAY: 500,
+        POST_SAVE_DELAY: 500,
+        POST_APPLY_DELAY: 500,
 
-        ENABLE_ALT_N: true       // Neue Konfigurationsvariable für ALT+N nach ALT+Q
+        ENABLE_ALT_N: true,
+        ROW_SELECTOR: 'table.o_list_table tbody tr.o_data_row.o_row_draggable.o_is_product'
     };
 
     function logInfo(message) {
@@ -111,9 +112,9 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    function waitForElement(selector, timeout = 5000) {
+    function waitForElement(selector, parent = document, timeout = 5000) {
         return new Promise((resolve, reject) => {
-            const element = document.querySelector(selector);
+            const element = parent.querySelector(selector);
             if (element) {
                 logInfo(`Element gefunden: ${selector}`);
                 return resolve(element);
@@ -122,7 +123,7 @@
             logInfo(`Warte auf Element: ${selector}`);
 
             const observer = new MutationObserver((mutations, obs) => {
-                const el = document.querySelector(selector);
+                const el = parent.querySelector(selector);
                 if (el) {
                     logInfo(`Element gefunden durch MutationObserver: ${selector}`);
                     resolve(el);
@@ -130,7 +131,7 @@
                 }
             });
 
-            observer.observe(document.body, { childList: true, subtree: true });
+            observer.observe(parent, { childList: true, subtree: true });
 
             setTimeout(() => {
                 observer.disconnect();
@@ -226,7 +227,7 @@
     async function waitForTabToLoad() {
         logInfo(`Warte darauf, dass der "${CONFIG.TAB_NAME}" Tab vollständig geladen ist.`);
         try {
-            await waitForElement(CONFIG.TAB_LOAD_SELECTOR, CONFIG.TAB_SEARCH_TIMEOUT);
+            await waitForElement(CONFIG.TAB_LOAD_SELECTOR, document, CONFIG.TAB_SEARCH_TIMEOUT);
             logInfo(`"${CONFIG.TAB_NAME}" Tab ist nun vollständig geladen.`);
         } catch (error) {
             logError(error);
@@ -234,24 +235,55 @@
         }
     }
 
-    async function activateAccountField() {
-        const accountCell = document.querySelector(CONFIG.ACCOUNT_CELL_SELECTOR);
-        if (!accountCell) throw 'Konto-Zelle nicht gefunden.';
+    // Funktion zur Verarbeitung jeder Zeile mit optionalen Aktionen
+    async function processRow(row, actions) {
+        const { setAccount, clearTaxes, setTax } = actions;
+        const dataId = row.getAttribute('data-id') || 'kein data-id';
+        const productNameSpan = row.querySelector('td[name="product_id"] span.text-truncate');
+        const productName = productNameSpan ? productNameSpan.textContent.trim() : 'Kein Produktname';
+
+        logInfo(`Verarbeite Zeile mit data-id="${dataId}" und Produktname="${productName}"`);
+
+        if (setAccount) {
+            await changeAccountInRow(row);
+        }
+
+        if (clearTaxes) {
+            await clearTaxesInRow(row);
+        }
+
+        if (setTax) {
+            await changeTaxInRow(row);
+        }
+
+        await sleep(300); // Kurzer Delay zwischen den Zeilen
+    }
+
+    // Funktion zum Ändern des Kontos in einer spezifischen Zeile
+    async function changeAccountInRow(row) {
+        const accountCell = row.querySelector(CONFIG.ACCOUNT_CELL_SELECTOR);
+        if (!accountCell) {
+            logWarn('Konto-Zelle nicht gefunden in der Zeile.');
+            return;
+        }
 
         accountCell.click();
         logInfo('Konto-Zelle angeklickt. Warte auf Eingabefeld ...');
 
         const inputSelector = `${CONFIG.ACCOUNT_CELL_SELECTOR} input.o-autocomplete--input.o_input.pe-3`;
-        const input = await waitForElement(inputSelector, CONFIG.INPUT_SEARCH_TIMEOUT);
-        return input;
-    }
+        let input;
+        try {
+            input = await waitForElement(inputSelector, row, CONFIG.INPUT_SEARCH_TIMEOUT);
+        } catch (error) {
+            logWarn('Eingabefeld für Konto nicht gefunden.');
+            return;
+        }
 
-    async function changeAccount() {
-        const input = await activateAccountField();
-        input.value = '';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        // Lösche den bestehenden Kontotext
+        simulateTextDeletion(input);
         logInfo('Bestehenden Kontotext gelöscht.');
 
+        // Setze den neuen Kontotext
         input.value = CONFIG.TARGET_ACCOUNT_TEXT;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         logInfo(`Neuen Kontotext "${CONFIG.TARGET_ACCOUNT_TEXT}" eingegeben.`);
@@ -260,124 +292,155 @@
         simulateKeyPress('Enter');
         logInfo('Enter-Taste simuliert (Konto). Warte auf Dropdown ...');
 
-        await clickDropdownItem(CONFIG.TARGET_ACCOUNT_TEXT);
+        // Kleine Verzögerung hinzufügen, um sicherzustellen, dass das Dropdown-Menü gerendert wird
+        await sleep(500);
+
+        try {
+            await clickDropdownItem(CONFIG.TARGET_ACCOUNT_TEXT, row);
+        } catch (error) {
+            logWarn(`Kein Dropdown-Menü gefunden oder Item "${CONFIG.TARGET_ACCOUNT_TEXT}" nicht gefunden. Prüfe, ob das Konto bereits gesetzt ist.`);
+
+            if (accountCell.textContent.trim() === CONFIG.TARGET_ACCOUNT_TEXT) {
+                logInfo(`Konto bereits korrekt auf "${CONFIG.TARGET_ACCOUNT_TEXT}" gesetzt. Fahre ohne Dropdown-Auswahl fort.`);
+            } else {
+                simulateKeyPress('Enter');
+                await sleep(CONFIG.POST_ENTER_KEY_DELAY);
+
+                if (accountCell.textContent.trim() === CONFIG.TARGET_ACCOUNT_TEXT) {
+                    logInfo(`Konto nach erneutem Enter auf "${CONFIG.TARGET_ACCOUNT_TEXT}" gesetzt.`);
+                } else {
+                    logWarn(`Konto konnte nicht automatisch auf "${CONFIG.TARGET_ACCOUNT_TEXT}" gesetzt werden. Bitte manuell prüfen.`);
+                }
+            }
+        }
     }
 
-    async function clearAccount() {
-        const input = await activateAccountField();
-        simulateTextDeletion(input);
+    // Funktion zum Löschen aller Steuern in einer spezifischen Zeile
+    async function clearTaxesInRow(row) {
+        const taxCell = row.querySelector(CONFIG.TAX_CELL_SELECTOR);
+        if (!taxCell) {
+            logWarn('Steuer-Zelle nicht gefunden in der Zeile.');
+            return;
+        }
 
-        await sleep(CONFIG.POST_ENTER_KEY_DELAY);
-        simulateKeyPress('Enter');
-        logInfo('Enter-Taste simuliert (Konto-leer). Sollte nun kein Konto gesetzt sein.');
-    }
-
-    async function activateTaxField() {
-        const taxCell = document.querySelector(CONFIG.TAX_CELL_SELECTOR);
-        if (!taxCell) throw 'Steuer-Zelle nicht gefunden.';
-
-        taxCell.click();
-        logInfo('Steuer-Zelle angeklickt. Warte auf Steuer-Eingabefeld ...');
-
-        const inputSelector = `${CONFIG.TAX_CELL_SELECTOR} input.o-autocomplete--input.o_input.pe-3`;
-        await waitForElement(inputSelector, CONFIG.INPUT_SEARCH_TIMEOUT);
-        return taxCell;
-    }
-
-    async function clearAllTaxTags() {
-        const taxCell = await activateTaxField();
         const deleteButtons = taxCell.querySelectorAll('a.o_delete');
-        deleteButtons.forEach(btn => btn.click());
         if (deleteButtons.length > 0) {
-            logInfo(`${deleteButtons.length} Steuertags gelöscht.`);
+            logInfo(`Lösche ${deleteButtons.length} Steuertag(e) in der Zeile.`);
+            // Da das DOM sich nach jedem Klick ändert, konvertieren wir die NodeList in ein Array
+            const buttons = Array.from(deleteButtons);
+            for (const btn of buttons) {
+                btn.click();
+                logInfo('Steuertag gelöscht.');
+                await sleep(300); // Wartezeit nach jedem Klick
+            }
+            logInfo(`Alle Steuertags in der Zeile wurden gelöscht.`);
         } else {
             logInfo('Keine Steuertags zum Löschen gefunden.');
         }
         await sleep(200);
     }
 
-    async function changeTax() {
-        await clearAllTaxTags();
+    // Funktion zum Ändern des Steuersatzes in einer spezifischen Zeile
+    async function changeTaxInRow(row) {
+        const taxCell = row.querySelector(CONFIG.TAX_CELL_SELECTOR);
+        if (!taxCell) {
+            logWarn('Steuer-Zelle nicht gefunden in der Zeile.');
+            return;
+        }
+
+        // Aktiviere das Steuer-Eingabefeld
+        taxCell.click();
+        logInfo('Steuer-Zelle angeklickt. Warte auf Steuer-Eingabefeld ...');
 
         const inputSelector = `${CONFIG.TAX_CELL_SELECTOR} input.o-autocomplete--input.o_input.pe-3`;
-        const input = document.querySelector(inputSelector);
-        if (!input) throw 'Steuer-Inputfeld nach Tag-Löschung nicht gefunden.';
+        let taxInput;
+        try {
+            taxInput = await waitForElement(inputSelector, row, CONFIG.INPUT_SEARCH_TIMEOUT);
+        } catch (error) {
+            logWarn('Steuer-Inputfeld nicht gefunden.');
+            return;
+        }
 
-        input.value = '';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-
-        input.value = CONFIG.TARGET_TAX_TEXT;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        logInfo(`Neuer Steuersatz-Text "${CONFIG.TARGET_TAX_TEXT}" eingegeben.`);
+        taxInput.value = CONFIG.TARGET_TAX_TEXT;
+        taxInput.dispatchEvent(new Event('input', { bubbles: true }));
+        logInfo(`Neuen Steuersatz "${CONFIG.TARGET_TAX_TEXT}" eingegeben.`);
 
         await sleep(CONFIG.POST_ENTER_KEY_DELAY);
         simulateKeyPress('Enter');
-        logInfo('Enter-Taste simuliert (Steuer). Warte auf Dropdown ...');
+        logInfo('Enter-Taste simuliert (Steuer).');
 
-        await clickDropdownItem(CONFIG.TARGET_TAX_TEXT);
+        // Kleine Verzögerung hinzufügen, um sicherzustellen, dass das Dropdown-Menü gerendert wird
+        await sleep(500);
+
+        try {
+            await clickDropdownItem(CONFIG.TARGET_TAX_TEXT, row);
+        } catch (error) {
+            logWarn(`Kein Dropdown-Menü oder Item "${CONFIG.TARGET_TAX_TEXT}" nicht gefunden. Prüfe manuell.`);
+        }
     }
 
-    async function removeTaxesOnly() {
-        await clearAllTaxTags();
-    }
-
-    async function clickDropdownItem(desiredText) {
+    // Funktion zum Klicken auf ein Dropdown-Item innerhalb einer spezifischen Zeile
+    async function clickDropdownItem(desiredText, row) {
         logInfo('Versuche, das Dropdown-Item zu finden und zu klicken.');
-        const dropdownMenuSelector = 'ul.o-autocomplete--dropdown-menu.ui-widget.show.dropdown-menu.ui-autocomplete';
-        const dropdownMenu = await waitForElement(dropdownMenuSelector, 5000);
 
-        logInfo(`Dropdown-Menü gefunden: ${dropdownMenuSelector}`);
-        const dropdownItem = await waitForDropdownItem(desiredText, dropdownMenu, 5000);
+        // Suchen Sie alle Dropdown-Menüs innerhalb der spezifischen Zeile
+        const dropdownMenus = row.querySelectorAll('ul.o-autocomplete--dropdown-menu.ui-widget.show.dropdown-menu.ui-autocomplete');
+
+        if (dropdownMenus.length === 0) {
+            logError('Dropdown-Menü nicht gefunden.');
+            throw 'Dropdown-Menü nicht gefunden.';
+        }
+
+        // Nehmen Sie das zuletzt geöffnete Dropdown-Menü an
+        const dropdownMenu = dropdownMenus[dropdownMenus.length -1];
+        logInfo(`Dropdown-Menü gefunden: ${dropdownMenu}`);
+
+        // Finden Sie das gewünschte Dropdown-Item innerhalb dieses Dropdown-Menüs
+        const dropdownItem = Array.from(dropdownMenu.querySelectorAll('a.dropdown-item.ui-menu-item-wrapper.text-truncate'))
+            .find(a => a.textContent.trim() === desiredText);
 
         if (dropdownItem) {
             dropdownItem.click();
             logInfo(`Dropdown-Item mit Text "${desiredText}" angeklickt.`);
         } else {
+            logError(`Dropdown-Item mit Text "${desiredText}" nicht gefunden.`);
             throw `Dropdown-Item mit Text "${desiredText}" nicht gefunden.`;
         }
     }
 
-    function waitForDropdownItem(text, dropdownMenu, timeout = 5000) {
-        return new Promise((resolve, reject) => {
-            const start = Date.now();
+    // Überarbeitete Funktion zur Verarbeitung aller relevanten Zeilen mit konfigurierbaren Aktionen
+    async function processAllRows(actions) {
+        logInfo('Beginne, alle relevanten <tr> Elemente zu zählen und zu verarbeiten.');
+        const allRows = Array.from(document.querySelectorAll(CONFIG.ROW_SELECTOR));
+        const rowCount = allRows.length;
+        logInfo(`Gefundene relevante Tabellenzeilen: ${rowCount}`);
 
-            const check = () => {
-                const items = Array.from(dropdownMenu.querySelectorAll('a.dropdown-item.ui-menu-item-wrapper.text-truncate'));
-                const desiredItem = items.find(a => a.textContent.trim() === text);
-                if (desiredItem) {
-                    resolve(desiredItem);
-                } else if (Date.now() - start > timeout) {
-                    const availableTexts = items.map(a => a.textContent.trim());
-                    logInfo(`Verfügbare Dropdown-Items: ${availableTexts.join(', ')}`);
-                    reject(`Dropdown-Item mit Text "${text}" nicht gefunden.`);
-                } else {
-                    setTimeout(check, 100);
-                }
-            };
+        if (rowCount === 0) {
+            logWarn('Keine Tabellenzeilen gefunden, die verarbeitet werden können.');
+            return;
+        }
 
-            check();
-        });
+        for (let index = 0; index < rowCount; index++) {
+            const row = allRows[index];
+            await processRow(row, actions);
+        }
+
+        logInfo('Alle relevanten <tr> Elemente wurden verarbeitet.');
     }
 
     async function performPostActions() {
-        // 1. kleiner Delay vor allen Änderungen
         await sleep(CONFIG.PRE_ACTION_DELAY);
 
-        // 2. ALT+S (Speichern)
         simulateKeyCombination('s', 'Alt');
         logInfo('Tastenkombination ALT + S (Speichern) simuliert.');
 
-        // 3. kleiner Delay zwischen ALT+S und ALT+Q
         await sleep(CONFIG.POST_SAVE_DELAY);
 
-        // 4. ALT+Q (Anwenden)
         simulateKeyCombination('q', 'Alt');
         logInfo('Tastenkombination ALT + Q (Anwenden) simuliert.');
 
-        // 5. Kurzer Delay nach ALT+Q
         await sleep(CONFIG.POST_APPLY_DELAY);
 
-        // 6. Optional ALT+N ausführen, wenn aktiviert
         if (CONFIG.ENABLE_ALT_N) {
             simulateKeyCombination('n', 'Alt');
             logInfo('Tastenkombination ALT + N ausgeführt (optional).');
@@ -385,14 +448,18 @@
     }
 
     async function handleShortcut(e) {
-        // Konto ändern: STRG+SHIFT+:
+        // Strg+Shift+Ö: Konto + Alle Steuern löschen + Steuersatz setzen
+        // Strg+Shift+Ä: Konto + Alle Steuern löschen
+        // Strg+Shift+: Konto ändern
+        // Strg+Shift+Ü: Konto und Steuersatz zurücksetzen (Konto clearen, Steuern entfernen, aber kein neuer Steuersatz)
+
         if (e.ctrlKey && e.shiftKey && e.key === ':') {
             e.preventDefault();
             logInfo('Shortcut für Konto-Änderung ausgelöst (Strg+Shift+:)');
             try {
                 await clickTab();
                 await waitForTabToLoad();
-                await changeAccount();
+                await processAllRows({ setAccount: true, clearTaxes: false, setTax: false });
 
                 await sleep(CONFIG.POST_CLICK_DELAY);
                 await performPostActions();
@@ -403,7 +470,6 @@
             }
         }
 
-        // Steuersatz überschreiben + Konto ändern: STRG+SHIFT+Ö
         if (e.ctrlKey && e.shiftKey && e.key === 'Ö') {
             e.preventDefault();
             logInfo('Shortcut für Steuer-Überschreibung + Konto-Änderung ausgelöst (Strg+Shift+Ö)');
@@ -411,10 +477,8 @@
                 await clickTab();
                 await waitForTabToLoad();
 
-                await changeAccount();
-                await changeTax();
+                await processAllRows({ setAccount: true, clearTaxes: true, setTax: true });
 
-                await sleep(CONFIG.POST_CLICK_DELAY);
                 await performPostActions();
 
                 logInfo('Steuersatz und Konto erfolgreich überschrieben.');
@@ -423,7 +487,6 @@
             }
         }
 
-        // Konto und Steuersatz löschen/zurücksetzen: STRG+SHIFT+Ü
         if (e.ctrlKey && e.shiftKey && e.key === 'Ü') {
             e.preventDefault();
             logInfo('Shortcut für Konto und Steuersatz löschen ausgelöst (Strg+Shift+Ü)');
@@ -431,8 +494,8 @@
                 await clickTab();
                 await waitForTabToLoad();
 
-                await clearAccount();
-                await removeTaxesOnly();
+                // Für Strg+Shift+Ü: Konto löschen und Steuern löschen
+                await processAllRows({ setAccount: false, clearTaxes: true, setTax: false });
 
                 await sleep(CONFIG.POST_CLICK_DELAY);
                 await performPostActions();
@@ -443,7 +506,6 @@
             }
         }
 
-        // Konto überschreiben und Steuersatz löschen/zurücksetzen: STRG+SHIFT+Ä
         if (e.ctrlKey && e.shiftKey && e.key === 'Ä') {
             e.preventDefault();
             logInfo('Shortcut für Konto überschreiben und Steuersatz zurücksetzen ausgelöst (Strg+Shift+Ä)');
@@ -451,8 +513,8 @@
                 await clickTab();
                 await waitForTabToLoad();
 
-                await changeAccount();
-                await removeTaxesOnly();
+                // Für Strg+Shift+Ä: Konto setzen und Steuern löschen, aber keinen neuen Steuersatz setzen
+                await processAllRows({ setAccount: true, clearTaxes: true, setTax: false });
 
                 await sleep(CONFIG.POST_CLICK_DELAY);
                 await performPostActions();
@@ -464,7 +526,7 @@
         }
     }
 
-    function init() {
+    async function init() {
         logInfo('Userscript initialisiert und bereit.');
         document.addEventListener('keydown', handleShortcut, false);
     }

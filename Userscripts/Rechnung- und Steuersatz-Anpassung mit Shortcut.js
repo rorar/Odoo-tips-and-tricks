@@ -1,10 +1,14 @@
 // ==UserScript==
-// @name         Rechnung- und Steuersatz-Anpassung mit Shortcut (mit Alt+S und Alt+Q)
+// @name         Rechnung- und Steuersatz-Anpassung mit Shortcut (mit Alt+S, Alt+Q, optional Alt+N)
 // @namespace    http://tampermonkey.net/
 // @version      3.6
-// @description  Ändert Buchungskonto und Steuersatz per Tastenkombination. STRG+SHIFT+Ü löscht beide Felder, STRG+SHIFT+Ä überschreibt Konto und löscht Steuersatz. Enthält echte Textlöschung und sequenzielle POST-Aktionen (ALT+S und ALT+Q).
-// @match        *://*/*/odoo/accounting/*/reconciliation/*/account.move/*
+// @description  Ändert Konto und Steuersatz per Shortcuts in Odoo. Nach den Änderungen wird zuerst ein kleiner Delay eingefügt, dann ALT+S (Speichern), dann nochmal Delay, dann ALT+Q (Anwenden), optional danach ALT+N.
+// @match        *://*/odoo/accounting/*/reconciliation/*/account.move/*
+// @match        *://*.*/odoo/accounting/*/reconciliation/*/account.move/*
 // @match        *://*/odoo/bills/*
+// @match        *://*.*/odoo/bills/*
+// @match        *://*/odoo/accounting/*/bills/*
+// @match        *://*.*/odoo/accounting/*/bills/*
 // @grant        none
 // ==/UserScript==
 
@@ -66,7 +70,7 @@
         SHORTCUT_RESET_BOTH: { ctrlKey: true, shiftKey: true, key: 'Ü' },
         SHORTCUT_OVERRIDE_ACCOUNT_RESET_TAX: { ctrlKey: true, shiftKey: true, key: 'Ä' },
 
-        TARGET_ACCOUNT_TEXT: '6837 Aufwendungen für die zeitlich befristete Überlassung von Rechten (Lizenzen, Konzessionen)',
+        TARGET_ACCOUNT_TEXT: '5900 Fremdleistungen',
         TARGET_TAX_TEXT: '19% EU O S',
 
         ACCOUNT_CELL_SELECTOR: 'td[name="account_id"]',
@@ -78,9 +82,11 @@
         POST_CLICK_DELAY: 1500,
         POST_ENTER_DELAY: 1500,
 
-        // Neue Delays für die Aktionen
-        PRE_ACTION_DELAY: 500,  // Delay vor allen Änderungen (ALT+S und ALT+Q)
-        POST_SAVE_DELAY: 500,   // Delay zwischen ALT+S und ALT+Q
+        PRE_ACTION_DELAY: 500,   // Delay vor allen Änderungen (ALT+S, ALT+Q, optional ALT+N)
+        POST_SAVE_DELAY: 500,    // Delay zwischen ALT+S und ALT+Q
+        POST_APPLY_DELAY: 500,   // Neuer Delay nach ALT+Q, bevor optional ALT+N ausgeführt wird
+
+        ENABLE_ALT_N: true       // Neue Konfigurationsvariable für ALT+N nach ALT+Q
     };
 
     function logInfo(message) {
@@ -361,12 +367,21 @@
         simulateKeyCombination('s', 'Alt');
         logInfo('Tastenkombination ALT + S (Speichern) simuliert.');
 
-        // 3. kleiner Delay
+        // 3. kleiner Delay zwischen ALT+S und ALT+Q
         await sleep(CONFIG.POST_SAVE_DELAY);
 
         // 4. ALT+Q (Anwenden)
         simulateKeyCombination('q', 'Alt');
         logInfo('Tastenkombination ALT + Q (Anwenden) simuliert.');
+
+        // 5. Kurzer Delay nach ALT+Q
+        await sleep(CONFIG.POST_APPLY_DELAY);
+
+        // 6. Optional ALT+N ausführen, wenn aktiviert
+        if (CONFIG.ENABLE_ALT_N) {
+            simulateKeyCombination('n', 'Alt');
+            logInfo('Tastenkombination ALT + N ausgeführt (optional).');
+        }
     }
 
     async function handleShortcut(e) {
